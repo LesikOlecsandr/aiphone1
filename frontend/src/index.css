@@ -4,6 +4,7 @@
 
 :host {
   all: initial;
+  display: block;
 }
 
 .ai-widget-root,
@@ -13,9 +14,33 @@
 }
 
 .ai-widget-root {
+  width: 100%;
   color: #132238;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+.ai-widget-overlay {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: manipulation;
+}
+
+.ai-widget-sheet {
+  height: var(--ai-widget-vh, 100dvh);
+  max-height: var(--ai-widget-vh, 100dvh);
+}
+
+.ai-widget-messages {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ai-widget-composer textarea,
+.ai-widget-composer input,
+.ai-widget-composer select {
+  font-size: 16px;
+  line-height: 1.5;
 }
 
 .ai-scrollbar::-webkit-scrollbar {
@@ -36,5 +61,9 @@ input {
 @media (max-width: 640px) {
   .ai-widget-root {
     width: 100%;
+  }
+
+  .ai-widget-sheet {
+    min-height: -webkit-fill-available;
   }
 }

@@ -102,6 +102,40 @@ export function WidgetApp({ apiBaseUrl, title, accentLabel }) {
   const preview = useMemo(() => buildPreview(selectedFile), [selectedFile]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const setViewportHeight = () => {
+      const visualHeight = window.visualViewport?.height || window.innerHeight;
+      document.documentElement.style.setProperty("--ai-widget-vh", `${visualHeight}px`);
+    };
+
+    setViewportHeight();
+    window.addEventListener("resize", setViewportHeight);
+    window.visualViewport?.addEventListener("resize", setViewportHeight);
+
+    return () => {
+      window.removeEventListener("resize", setViewportHeight);
+      window.visualViewport?.removeEventListener("resize", setViewportHeight);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined" || !isOpen) return undefined;
+
+    const { body } = document;
+    const previousOverflow = body.style.overflow;
+    const previousTouchAction = body.style.touchAction;
+
+    body.style.overflow = "hidden";
+    body.style.touchAction = "none";
+
+    return () => {
+      body.style.overflow = previousOverflow;
+      body.style.touchAction = previousTouchAction;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
     return () => {
       if (preview?.url) {
         URL.revokeObjectURL(preview.url);
@@ -318,8 +352,8 @@ export function WidgetApp({ apiBaseUrl, title, accentLabel }) {
       </p>
 
       {isOpen ? (
-        <div className="fixed inset-0 z-[2147483001] flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-sm sm:p-4 md:items-center">
-          <div className="h-[100dvh] w-full rounded-none border-0 bg-[linear-gradient(180deg,#f8fafc_0%,#fff7ed_45%,#f0fdfa_100%)] p-2 shadow-glow sm:h-auto sm:w-[min(96vw,620px)] sm:rounded-[34px] sm:border sm:border-white/70 sm:p-4">
+        <div className="ai-widget-overlay fixed inset-0 z-[2147483001] flex items-end justify-center overflow-hidden bg-slate-950/40 p-0 backdrop-blur-sm sm:p-4 md:items-center">
+          <div className="ai-widget-sheet h-[var(--ai-widget-vh,100dvh)] w-full rounded-none border-0 bg-[linear-gradient(180deg,#f8fafc_0%,#fff7ed_45%,#f0fdfa_100%)] p-2 shadow-glow sm:h-auto sm:w-[min(96vw,620px)] sm:rounded-[34px] sm:border sm:border-white/70 sm:p-4">
             <div className="flex h-full flex-col rounded-[24px] bg-white/90 shadow-sm sm:max-h-[88vh]">
               <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-4 py-4 sm:px-5">
                 <div className="min-w-0">
@@ -360,7 +394,7 @@ export function WidgetApp({ apiBaseUrl, title, accentLabel }) {
                 </div>
               </div>
 
-              <div className="ai-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5">
+              <div className="ai-widget-messages ai-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5">
                 <div className="space-y-3">
                   {messages.map((item, index) => (
                     <div key={`${item.role}-${index}`} className={item.role === "user" ? "flex justify-end" : "flex justify-start"}>
@@ -422,7 +456,7 @@ export function WidgetApp({ apiBaseUrl, title, accentLabel }) {
                 </div>
               </div>
 
-              <div className="border-t border-slate-100 px-3 pb-[max(14px,env(safe-area-inset-bottom))] pt-3 sm:px-5 sm:pt-4">
+              <div className="ai-widget-composer border-t border-slate-100 px-3 pb-[max(14px,env(safe-area-inset-bottom))] pt-3 sm:px-5 sm:pt-4">
                 <div className="flex items-end gap-2 sm:gap-3">
                   <button
                     type="button"
@@ -450,7 +484,7 @@ export function WidgetApp({ apiBaseUrl, title, accentLabel }) {
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
                       rows={2}
-                      className="max-h-28 w-full resize-none border-0 bg-transparent text-[13px] leading-6 text-ink outline-none sm:max-h-32 sm:text-sm"
+                      className="max-h-28 w-full resize-none border-0 bg-transparent text-base leading-6 text-ink outline-none md:max-h-32 md:text-sm"
                       placeholder="Np. iPhone X po upadku, dotyk działa, ale pękło szkło. Możesz też od razu podać imię i numer telefonu."
                     />
                   </div>
