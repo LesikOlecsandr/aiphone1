@@ -1,0 +1,15 @@
+services:
+  ai-repair-estimator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-repair-estimator
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./uploads:/app/uploads
+      - ./instance:/app/instance
+      - ./repair_estimator.db:/app/repair_estimator.db
+    restart: unless-stopped

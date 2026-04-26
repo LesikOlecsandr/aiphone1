@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:host {
+  all: initial;
+}
+
+.ai-widget-root,
+.ai-widget-root * {
+  box-sizing: border-box;
+  font-family: "Manrope", "Segoe UI", sans-serif;
+}
+
+.ai-widget-root {
+  color: #132238;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.ai-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ai-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.7);
+  border-radius: 999px;
+}
+
+textarea,
+button,
+input {
+  font: inherit;
+}
+
+@media (max-width: 640px) {
+  .ai-widget-root {
+    width: 100%;
+  }
+}

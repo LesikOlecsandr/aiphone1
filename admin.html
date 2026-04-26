@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Center</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f4f7fb;
+            --card: rgba(255,255,255,.86);
+            --line: #dbe4f0;
+            --ink: #132238;
+            --muted: #5f7288;
+            --accent-a: #f97316;
+            --accent-b: #0891b2;
+            --danger: #ef4444;
+            --success: #16a34a;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: "Segoe UI", sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(249,115,22,.18), transparent 28%),
+                radial-gradient(circle at top right, rgba(8,145,178,.14), transparent 30%),
+                var(--bg);
+            color: var(--ink);
+        }
+        .shell { max-width: 1380px; margin: 0 auto; padding: 28px 20px 40px; }
+        .hero, .card {
+            background: var(--card);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,.55);
+            border-radius: 28px;
+            box-shadow: 0 22px 55px rgba(15,23,42,.08);
+        }
+        .hero { padding: 26px; margin-bottom: 20px; }
+        .hero-top { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+        .eyebrow { font-size: 12px; letter-spacing: .22em; text-transform: uppercase; color: var(--accent-a); font-weight: 700; }
+        h1, h2, h3, h4 { margin: 0; }
+        h1 { font-size: 34px; margin-top: 10px; }
+        p { color: var(--muted); line-height: 1.65; }
+        .hidden { display: none !important; }
+        .auth-wrap { max-width: 560px; margin: 48px auto 0; }
+        .auth-card { padding: 26px; }
+        .grid { display: grid; grid-template-columns: 260px 1fr; gap: 20px; }
+        .sidebar, .content { min-height: 720px; }
+        .sidebar { padding: 16px; }
+        .content { padding: 22px; }
+        .nav-btn, .btn {
+            border: 0;
+            border-radius: 16px;
+            padding: 12px 16px;
+            cursor: pointer;
+            font-weight: 700;
+            transition: .2s ease;
+        }
+        .nav-btn {
+            width: 100%;
+            text-align: left;
+            background: transparent;
+            color: var(--ink);
+            margin-bottom: 8px;
+        }
+        .nav-btn.active, .nav-btn:hover {
+            background: linear-gradient(135deg, rgba(249,115,22,.12), rgba(8,145,178,.12));
+        }
+        .btn {
+            background: linear-gradient(135deg, var(--accent-a), var(--accent-b));
+            color: white;
+        }
+        .btn.secondary {
+            background: white;
+            color: var(--ink);
+            border: 1px solid var(--line);
+        }
+        .btn.danger { background: var(--danger); }
+        .btn:disabled { opacity: .55; cursor: not-allowed; }
+        .stack { display: grid; gap: 18px; }
+        .two-col { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
+        .three-col { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; }
+        label { display:block; font-size: 14px; font-weight: 600; color: var(--ink); }
+        input, textarea {
+            width: 100%;
+            margin-top: 8px;
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid var(--line);
+            background: rgba(255,255,255,.92);
+            color: var(--ink);
+            font: inherit;
+        }
+        textarea { min-height: 104px; resize: vertical; }
+        .panel { display: none; }
+        .panel.active { display: block; }
+        .list {
+            border: 1px solid var(--line);
+            border-radius: 22px;
+            overflow: hidden;
+            background: white;
+        }
+        .item {
+            padding: 16px;
+            border-bottom: 1px solid #edf2f7;
+            cursor: pointer;
+        }
+        .item:last-child { border-bottom: 0; }
+        .item:hover { background: #f8fbff; }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 5px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+            background: #ecfeff;
+            color: #0f766e;
+        }
+        .lead-layout { display:grid; grid-template-columns: 360px 1fr; gap: 18px; }
+        .msg { padding: 12px 14px; border-radius: 16px; margin-bottom: 10px; }
+        .msg.user { background: #fff7ed; }
+        .msg.assistant { background: #ecfeff; }
+        .msg.system { background: #f1f5f9; }
+        img, video { max-width: 220px; border-radius: 16px; margin: 8px 10px 0 0; }
+        .top-actions { display:flex; gap: 10px; flex-wrap: wrap; }
+        .note { font-size: 13px; color: var(--muted); }
+        .code {
+            padding: 14px 16px;
+            border-radius: 18px;
+            background: #0f172a;
+            color: #e2e8f0;
+            font-family: Consolas, monospace;
+            font-size: 13px;
+            overflow-x: auto;
+        }
+        @media (max-width: 1100px) {
+            .grid, .lead-layout { grid-template-columns: 1fr; }
+            .three-col, .two-col { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <div class="hero">
+            <div class="hero-top">
+                <div>
+                    <div class="eyebrow">Control Center</div>
+                    <h1>AI Repair Estimator</h1>
+                    <p id="hero-subtitle">Bezpieczne centrum konfiguracji, leadów i wycen dla realnego wdrożenia na stronie.</p>
+                </div>
+                <div class="top-actions">
+                    <button id="logout-btn" class="btn secondary hidden" type="button">Wyloguj</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="auth-root" class="auth-wrap hidden">
+            <div id="setup-card" class="hero auth-card hidden">
+                <div class="eyebrow">Pierwsza konfiguracja</div>
+                <h2 style="margin-top:10px;">Zabezpiecz panel i ustaw dane serwisu</h2>
+                <p>Ustaw haslo administratora, podstawowe dane kontaktowe i klucz Gemini. To wystarczy, aby uruchomic projekt na serwerze i pozniej zarzadzac wszystkim z panelu.</p>
+                <form id="setup-form" class="stack">
+                    <div class="two-col">
+                        <label>Nazwa serwisu
+                            <input id="setup_business_name" type="text" value="AI Repair Estimator" required>
+                        </label>
+                        <label>Haslo administratora
+                            <input id="setup_password" type="password" minlength="6" required>
+                        </label>
+                    </div>
+                    <label>Potwierdz haslo administratora
+                        <input id="setup_confirm_password" type="password" minlength="6" required>
+                    </label>
+                    <div class="two-col">
+                        <label>Telefon
+                            <input id="setup_business_phone" type="text" placeholder="+48 000 000 000">
+                        </label>
+                        <label>E-mail
+                            <input id="setup_business_email" type="email" placeholder="kontakt@twojserwis.pl">
+                        </label>
+                    </div>
+                    <div class="two-col">
+                        <label>Adres
+                            <input id="setup_business_address" type="text" placeholder="Ul. Przykladowa 1, Warszawa">
+                        </label>
+                        <label>Godziny pracy
+                            <input id="setup_working_hours" type="text" placeholder="Pon-Pt 9:00-18:00, Sob 10:00-14:00">
+                        </label>
+                    </div>
+                    <div class="two-col">
+                        <label>Gemini API Key
+                            <input id="setup_gemini_api_key" type="password" placeholder="AIza...">
+                        </label>
+                        <label>Model Gemini
+                            <input id="setup_gemini_model" type="text" value="gemini-2.5-flash">
+                        </label>
+                    </div>
+                    <button class="btn" type="submit">Uruchom panel</button>
+                </form>
+            </div>
+
+            <div id="login-card" class="hero auth-card hidden">
+                <div class="eyebrow">Logowanie</div>
+                <h2 style="margin-top:10px;">Wejdz do technicznego panelu</h2>
+                <p>Panel chroni dane klientow, cenniki i konfiguracje AI. Zaloguj sie haslem administratora.</p>
+                <form id="login-form" class="stack">
+                    <label>Haslo administratora
+                        <input id="login_password" type="password" minlength="6" required>
+                    </label>
+                    <button class="btn" type="submit">Zaloguj</button>
+                </form>
+            </div>
+        </div>
+
+        <div id="app-root" class="grid hidden">
+            <div class="card sidebar">
+                <button class="nav-btn active" data-tab="leads">Lidy</button>
+                <button class="nav-btn" data-tab="repairs">Naprawy</button>
+                <button class="nav-btn" data-tab="base">Bazowe dane</button>
+                <button class="nav-btn" data-tab="pricing">Parametry cenowe</button>
+                <button class="nav-btn" data-tab="technical">Techniczne</button>
+                <div style="margin-top:22px;" class="note">
+                    Wejście do panelu administracyjnego odbywa się tylko przez to centrum zarządzania.
+                </div>
+            </div>
+
+            <div class="card content">
+                <section id="tab-leads" class="panel active">
+                    <div class="lead-layout">
+                        <div>
+                            <h2>Lidy i rozmowy</h2>
+                            <p>AI sama tworzy leady i prowadzi klienta do zostawienia kontaktu. Tutaj widzisz historie rozmow i zalaczniki.</p>
+                            <div id="leads-list" class="list"></div>
+                        </div>
+                        <div>
+                            <h2>Szczegoly zgloszenia</h2>
+                            <div id="lead-detail" class="list" style="padding:18px;">Wybierz lead z listy po lewej.</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="tab-repairs" class="panel">
+                    <h2>Katalog napraw</h2>
+                    <p>Dodawaj popularne uslugi tekstowo, np. Reinstalacja Windows - 150 PLN. AI najpierw sprawdza te pozycje, a dopiero potem improwizuje ceny.</p>
+                    <form id="repair-form" class="stack" style="margin-top:18px;">
+                        <div class="two-col">
+                            <label>Nazwa naprawy
+                                <input id="repair_title" type="text" placeholder="Np. Reinstalacja Windows" required>
+                            </label>
+                            <label>Cena bazowa (PLN)
+                                <input id="repair_price" type="number" step="0.01" placeholder="150" required>
+                            </label>
+                        </div>
+                        <label>Opis lub zakres
+                            <textarea id="repair_description" placeholder="Np. Instalacja systemu, sterowniki, konfiguracja podstawowa, bez odzyskiwania danych"></textarea>
+                        </label>
+                        <button class="btn" type="submit">Dodaj naprawe</button>
+                    </form>
+                    <div id="repairs-list" class="list" style="margin-top:18px;"></div>
+                </section>
+
+                <section id="tab-base" class="panel">
+                    <h2>Bazowe dane firmy</h2>
+                    <p>Te informacje sa uzywane przez AI w rozmowie, gdy proponuje kontakt lub zapis do serwisu.</p>
+                    <form id="base-form" class="stack" style="margin-top:18px;">
+                        <div class="two-col">
+                            <label>Nazwa serwisu
+                                <input id="business_name" type="text" required>
+                            </label>
+                            <label>Telefon
+                                <input id="business_phone" type="text">
+                            </label>
+                        </div>
+                        <div class="two-col">
+                            <label>E-mail
+                                <input id="business_email" type="email">
+                            </label>
+                            <label>Godziny pracy
+                                <input id="working_hours" type="text">
+                            </label>
+                        </div>
+                        <label>Adres
+                            <input id="business_address" type="text">
+                        </label>
+                        <button class="btn" type="submit">Zapisz bazowe dane</button>
+                    </form>
+                </section>
+
+                <section id="tab-pricing" class="panel">
+                    <h2>Parametry cenowe</h2>
+                    <p>Te ustawienia odpowiadaja za podstawowa logike wycen i widelek.</p>
+                    <form id="pricing-form" class="stack" style="margin-top:18px;">
+                        <div class="three-col">
+                            <label>Stawka godzinowa
+                                <input id="hourly_rate" type="number" step="0.01" required>
+                            </label>
+                            <label>Marza na czesciach
+                                <input id="parts_margin" type="number" step="0.01" required>
+                            </label>
+                            <label>VAT
+                                <input id="tax_multiplier" type="number" step="0.01" required>
+                            </label>
+                        </div>
+                        <button class="btn" type="submit">Zapisz parametry</button>
+                    </form>
+                </section>
+
+                <section id="tab-technical" class="panel">
+                    <h2>Techniczne i bezpieczenstwo</h2>
+                    <p>Tu zmienisz klucz AI, model, tekst przycisku widzetu i haslo dostepu do panelu.</p>
+                    <form id="technical-form" class="stack" style="margin-top:18px;">
+                        <div class="two-col">
+                            <label>Tytul widzetu
+                                <input id="widget_title" type="text" required>
+                            </label>
+                            <label>Tekst przycisku
+                                <input id="widget_button_label" type="text" required>
+                            </label>
+                        </div>
+                        <div class="two-col">
+                            <label>Podpis akcentu
+                                <input id="accent_label" type="text" required>
+                            </label>
+                            <label>Model Gemini
+                                <input id="gemini_model" type="text" required>
+                            </label>
+                        </div>
+                        <div class="two-col">
+                            <label>Nowy Gemini API Key
+                                <input id="gemini_api_key" type="password" placeholder="Zostaw puste, aby nie zmieniac">
+                            </label>
+                            <label>Nowe haslo administratora
+                                <input id="new_admin_password" type="password" minlength="6" placeholder="Opcjonalnie">
+                            </label>
+                        </div>
+                        <label>Potwierdz nowe haslo administratora
+                            <input id="new_admin_password_confirm" type="password" minlength="6" placeholder="Powtorz nowe haslo">
+                        </label>
+                        <div class="note" id="api-key-mask"></div>
+                        <button class="btn" type="submit">Zapisz techniczne ustawienia</button>
+                    </form>
+
+                    <div style="margin-top:24px;">
+                        <h3>Kod osadzenia widzetu</h3>
+                        <p>Wklej skrypt w miejscu strony, w ktorym ma pojawic sie przycisk otwierajacy chat.</p>
+                        <div id="embed-code" class="code"></div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const api = {
+            bootstrap: () => fetch('/api/v1/control/bootstrap').then(r => r.json()),
+            setup: (payload) => fetch('/api/v1/control/setup', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(payload)
+            }).then(handleJson),
+            login: (payload) => fetch('/api/v1/control/login', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(payload)
+            }).then(handleJson),
+            logout: () => fetch('/api/v1/control/logout', {method:'POST'}).then(handleJson),
+            getConfig: () => fetch('/api/v1/control/config').then(handleJson),
+            saveConfig: (payload) => fetch('/api/v1/control/config', {
+                method: 'PUT',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(payload)
+            }).then(handleJson),
+            getPricing: () => fetch('/api/v1/admin/settings').then(handleJson),
+            savePricing: (payload) => fetch('/api/v1/admin/settings', {
+                method: 'PUT',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(payload)
+            }).then(handleJson),
+            getLeads: () => fetch('/api/v1/admin/leads').then(handleJson),
+            getLead: (id) => fetch(`/api/v1/admin/leads/${id}`).then(handleJson),
+            getRepairs: () => fetch('/api/v1/admin/repairs').then(handleJson),
+            createRepair: (payload) => fetch('/api/v1/admin/repairs', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(payload)
+            }).then(handleJson),
+            deleteRepair: (id) => fetch(`/api/v1/admin/repairs/${id}`, {method:'DELETE'}).then(handleJson),
+        };
+
+        function handleJson(response) {
+            return response.json().catch(() => ({})).then((body) => {
+                if (!response.ok) {
+                    throw new Error(body.detail || 'Wystapil blad.');
+                }
+                return body;
+            });
+        }
+
+        function $(id) { return document.getElementById(id); }
+
+        function setTab(tab) {
+            document.querySelectorAll('.nav-btn').forEach((btn) => {
+                btn.classList.toggle('active', btn.dataset.tab === tab);
+            });
+            document.querySelectorAll('.panel').forEach((panel) => {
+                panel.classList.toggle('active', panel.id === `tab-${tab}`);
+            });
+        }
+
+        async function bootstrapPage() {
+            try {
+                const state = await api.bootstrap();
+                if (!state.is_setup) {
+                    $('auth-root').classList.remove('hidden');
+                    $('setup-card').classList.remove('hidden');
+                    $('login-card').classList.add('hidden');
+                    $('app-root').classList.add('hidden');
+                    $('logout-btn').classList.add('hidden');
+                    return;
+                }
+                if (!state.is_authenticated) {
+                    $('auth-root').classList.remove('hidden');
+                    $('setup-card').classList.add('hidden');
+                    $('login-card').classList.remove('hidden');
+                    $('app-root').classList.add('hidden');
+                    $('logout-btn').classList.add('hidden');
+                    return;
+                }
+                $('auth-root').classList.add('hidden');
+                $('app-root').classList.remove('hidden');
+                $('logout-btn').classList.remove('hidden');
+                await loadDashboard();
+            } catch (error) {
+                alert(error.message);
+            }
+        }
+
+        async function loadDashboard() {
+            const [config, pricing, repairs, leads] = await Promise.all([
+                api.getConfig(),
+                api.getPricing(),
+                api.getRepairs(),
+                api.getLeads()
+            ]);
+
+            $('hero-subtitle').textContent = `${config.business_name} - bezpieczne centrum konfiguracji, leadów i wycen.`;
+
+            $('business_name').value = config.business_name || '';
+            $('business_phone').value = config.business_phone || '';
+            $('business_email').value = config.business_email || '';
+            $('business_address').value = config.business_address || '';
+            $('working_hours').value = config.working_hours || '';
+            $('widget_title').value = config.widget_title || '';
+            $('widget_button_label').value = config.widget_button_label || '';
+            $('accent_label').value = config.accent_label || '';
+            $('gemini_model').value = config.gemini_model || '';
+            $('api-key-mask').textContent = config.gemini_api_key_masked
+                ? `Aktualny klucz Gemini jest ustawiony: ${config.gemini_api_key_masked}`
+                : 'Klucz Gemini nie jest jeszcze ustawiony.';
+
+            $('hourly_rate').value = pricing.hourly_rate;
+            $('parts_margin').value = pricing.parts_margin;
+            $('tax_multiplier').value = pricing.tax_multiplier;
+
+            renderRepairs(repairs);
+            renderLeads(leads);
+            renderEmbedCode();
+        }
+
+        function renderRepairs(items) {
+            $('repairs-list').innerHTML = items.map((item) => `
+                <div class="item">
+                    <div style="display:flex;justify-content:space-between;gap:14px;align-items:flex-start;">
+                        <div>
+                            <strong>${item.title}</strong><br>
+                            <span class="pill">${item.base_price} PLN</span>
+                            <p style="margin:10px 0 0;">${item.description || 'Bez dodatkowego opisu.'}</p>
+                        </div>
+                        <button class="btn danger" type="button" onclick="deleteRepair(${item.id})">Usun</button>
+                    </div>
+                </div>
+            `).join('') || '<div class="item">Brak pozycji w katalogu.</div>';
+        }
+
+        function renderLeads(items) {
+            $('leads-list').innerHTML = items.map((item) => `
+                <div class="item" onclick="loadLead(${item.id})">
+                    <strong>#${item.id}</strong> ${item.customer_name || 'Bez danych'}<br>
+                    <small>${item.device_model_raw || 'Brak modelu'} | ${item.phone || 'Brak telefonu'}</small><br>
+                    <span class="pill" style="margin-top:8px;">${formatStatus(item.status)}</span>
+                </div>
+            `).join('') || '<div class="item">Brak leadow.</div>';
+        }
+
+        function formatStatus(status) {
+            const map = {
+                new: 'Nowy',
+                in_progress: 'W trakcie',
+                gotowy_do_kontaktu: 'Gotowy do kontaktu',
+                estimated: 'Po wycenie',
+                closed: 'Zamknięty',
+            };
+            return map[status] || status;
+        }
+
+        async function loadLead(id) {
+            const data = await api.getLead(id);
+            const media = data.media_assets.map((item) => item.kind === 'video'
+                ? `<video controls src="${item.public_url}"></video>`
+                : `<img src="${item.public_url}" alt="">`).join('');
+            const messages = data.messages.map((msg) => `
+                <div class="msg ${msg.role}">
+                    <strong>${msg.role}</strong><br>${msg.message_text}
+                </div>
+            `).join('');
+            $('lead-detail').innerHTML = `
+                <p><strong>Klient:</strong> ${data.lead.customer_name || 'Brak danych'}</p>
+                <p><strong>Telefon:</strong> ${data.lead.phone || 'Brak telefonu'}</p>
+                <p><strong>Model:</strong> ${data.lead.device_model_raw || 'Brak modelu'}</p>
+                <p><strong>Problem:</strong> ${data.lead.problem_summary || 'Brak opisu'}</p>
+                <h3 style="margin-top:18px;">Historia rozmowy</h3>
+                ${messages || '<p>Brak wiadomosci.</p>'}
+                <h3 style="margin-top:18px;">Zdjecia i video</h3>
+                ${media || '<p>Brak mediow.</p>'}
+            `;
+        }
+
+        function renderEmbedCode() {
+            const baseUrl = window.location.origin;
+            $('embed-code').textContent = `<script src="${baseUrl}/static/widget.js" data-api-base-url="${baseUrl}"></` + `script>`;
+        }
+
+        async function deleteRepair(id) {
+            if (!confirm('Usunac te pozycje z katalogu?')) return;
+            await api.deleteRepair(id);
+            const repairs = await api.getRepairs();
+            renderRepairs(repairs);
+        }
+        window.deleteRepair = deleteRepair;
+        window.loadLead = loadLead;
+
+        $('setup-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            try {
+                if ($('setup_password').value !== $('setup_confirm_password').value) {
+                    alert('Hasla administratora musza byc identyczne.');
+                    return;
+                }
+                await api.setup({
+                    password: $('setup_password').value,
+                    confirm_password: $('setup_confirm_password').value,
+                    business_name: $('setup_business_name').value,
+                    business_phone: $('setup_business_phone').value || null,
+                    business_email: $('setup_business_email').value || null,
+                    business_address: $('setup_business_address').value || null,
+                    working_hours: $('setup_working_hours').value || null,
+                    gemini_api_key: $('setup_gemini_api_key').value || null,
+                    gemini_model: $('setup_gemini_model').value || 'gemini-2.5-flash'
+                });
+                await bootstrapPage();
+            } catch (error) {
+                alert(error.message);
+            }
+        });
+
+        $('login-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            try {
+                await api.login({ password: $('login_password').value });
+                $('login_password').value = '';
+                await bootstrapPage();
+            } catch (error) {
+                alert(error.message);
+            }
+        });
+
+        $('logout-btn').addEventListener('click', async () => {
+            await api.logout();
+            await bootstrapPage();
+        });
+
+        $('repair-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            await api.createRepair({
+                title: $('repair_title').value,
+                base_price: Number($('repair_price').value),
+                description: $('repair_description').value || null,
+                category: null
+            });
+            $('repair_title').value = '';
+            $('repair_price').value = '';
+            $('repair_description').value = '';
+            const repairs = await api.getRepairs();
+            renderRepairs(repairs);
+            alert('Naprawa dodana.');
+        });
+
+        $('base-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const config = await api.getConfig();
+            await api.saveConfig({
+                business_name: $('business_name').value,
+                business_phone: $('business_phone').value || null,
+                business_email: $('business_email').value || null,
+                business_address: $('business_address').value || null,
+                working_hours: $('working_hours').value || null,
+                widget_title: config.widget_title,
+                widget_button_label: config.widget_button_label,
+                accent_label: config.accent_label,
+                gemini_model: config.gemini_model,
+                gemini_api_key: null,
+                new_admin_password: null
+            });
+            alert('Bazowe dane zapisane.');
+            await loadDashboard();
+        });
+
+        $('pricing-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            await api.savePricing({
+                hourly_rate: Number($('hourly_rate').value),
+                parts_margin: Number($('parts_margin').value),
+                tax_multiplier: Number($('tax_multiplier').value),
+                currency: 'PLN'
+            });
+            alert('Parametry cenowe zapisane.');
+        });
+
+        $('technical-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const config = await api.getConfig();
+            if (
+                ($('new_admin_password').value || $('new_admin_password_confirm').value) &&
+                $('new_admin_password').value !== $('new_admin_password_confirm').value
+            ) {
+                alert('Nowe hasla administratora musza byc identyczne.');
+                return;
+            }
+            await api.saveConfig({
+                business_name: config.business_name,
+                business_phone: config.business_phone || null,
+                business_email: config.business_email || null,
+                business_address: config.business_address || null,
+                working_hours: config.working_hours || null,
+                widget_title: $('widget_title').value,
+                widget_button_label: $('widget_button_label').value,
+                accent_label: $('accent_label').value,
+                gemini_model: $('gemini_model').value,
+                gemini_api_key: $('gemini_api_key').value ? $('gemini_api_key').value : null,
+                new_admin_password: $('new_admin_password').value ? $('new_admin_password').value : null,
+                new_admin_password_confirm: $('new_admin_password_confirm').value ? $('new_admin_password_confirm').value : null
+            });
+            $('gemini_api_key').value = '';
+            $('new_admin_password').value = '';
+            $('new_admin_password_confirm').value = '';
+            alert('Techniczne ustawienia zapisane.');
+            await loadDashboard();
+        });
+
+        document.querySelectorAll('.nav-btn').forEach((btn) => {
+            btn.addEventListener('click', () => setTab(btn.dataset.tab));
+        });
+
+        bootstrapPage();
+    </script>
+</body>
+</html>

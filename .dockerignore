@@ -1,0 +1,16 @@
+venv
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+.env
+instance/runtime_config.json
+uploads
+repair_estimator.db
+frontend/node_modules
+frontend/dist
+README.md
+Текстовый документ.txt
