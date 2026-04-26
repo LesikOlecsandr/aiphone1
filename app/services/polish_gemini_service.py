@@ -166,8 +166,9 @@ class PolishGeminiService:
             "Wyszukaj orientacyjna cene gotowej uslugi naprawy w PLN na polskich stronach. "
             "Najpierw sprawdz konkurencyjne serwisy i cenniki napraw, a dopiero potem ogolne wyniki. "
             f"Jesli urzadzenie jest Apple, w pierwszej kolejnosci szukaj wynikow powiazanych z {preferred_domain}. "
-            "Jesli znajdziesz kilka cen, wybierz najbardziej realistyczna i konkurencyjna, bliska dolnej lub srodkowej czesci rynku, a nie najwyzsza. "
+            "Jesli znajdziesz kilka cen, wybierz najbardziej realistyczna i konkurencyjna, bliska dolnej czesci rynku, a nie najwyzsza. "
             "W pierwszej kolejnosci bierz ceny z iflix, a jesli ich brak, wtedy z innych polskich serwisow. "
+            "Jesli znajdziesz cene z iflix, preferuj ja nawet wtedy, gdy inne serwisy sa drozsze. "
             "Nie szukaj samej czesci, tylko ceny kompletnej uslugi wymiany lub naprawy. "
             "Zwroc wylacznie JSON o schemacie: "
             '{"repair_price": number, "source_url": string, "source_domain": string, "summary": string}. '

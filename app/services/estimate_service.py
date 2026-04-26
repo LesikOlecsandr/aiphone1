@@ -212,11 +212,11 @@ class EstimateService:
         """Lagodzi lokalna wycene benchmarkiem rynkowym, najmocniej dla Apple."""
 
         apple_bias = brand.lower() == "apple"
-        market_min = round(market_price * (0.97 if apple_bias else 0.96), 2)
-        market_max = round(market_price * (1.03 if apple_bias else 1.07), 2)
+        market_min = round(market_price * (0.96 if apple_bias else 0.96), 2)
+        market_max = round(market_price * (1.01 if apple_bias else 1.07), 2)
         if apple_bias:
             tuned_min = min(min_total, market_min)
-            tuned_max = min(max_total, market_max) if max_total >= market_min else market_max
+            tuned_max = market_max
         else:
             tuned_min = round((min_total + market_min) / 2, 2)
             tuned_max = round((max_total + market_max) / 2, 2)
@@ -236,7 +236,7 @@ class EstimateService:
         """Dopasowuje wycene do konkretnej pozycji z katalogu napraw."""
 
         anchored_min = round(min(min_total, catalog_price * 0.98), 2)
-        anchored_max = round(min(max_total, catalog_price * 1.08), 2)
+        anchored_max = round(min(max_total, catalog_price * 1.04), 2)
         if anchored_max < anchored_min:
             anchored_max = anchored_min
         return anchored_min, anchored_max, round((anchored_min + anchored_max) / 2, 2)

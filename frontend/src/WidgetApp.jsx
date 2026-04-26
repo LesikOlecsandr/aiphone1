@@ -332,11 +332,11 @@ export function WidgetApp({ apiBaseUrl, title, accentLabel }) {
         </button>
       </div>
 
-      <div className="inline-flex max-w-full flex-col items-start gap-3 md:hidden">
+      <div className="inline-flex max-w-full flex-col items-start gap-2 md:hidden">
         <button
           type="button"
           onClick={() => setIsOpen(true)}
-          className="group inline-flex max-w-full items-center gap-3 rounded-[22px] border border-white/50 bg-[linear-gradient(135deg,#f97316_0%,#0891b2_100%)] px-4 py-3 text-white shadow-glow transition duration-300 hover:translate-y-[-1px]"
+          className="group inline-flex max-w-full items-center gap-3 rounded-[20px] border border-white/50 bg-[linear-gradient(135deg,#f97316_0%,#0891b2_100%)] px-4 py-3 text-white shadow-glow transition duration-300 hover:translate-y-[-1px]"
           aria-label="Otwórz czat wyceny"
         >
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/15 text-2xl">+</span>
@@ -353,13 +353,13 @@ export function WidgetApp({ apiBaseUrl, title, accentLabel }) {
 
       {isOpen ? (
         <div className="ai-widget-overlay fixed inset-0 z-[2147483001] flex items-end justify-center overflow-hidden bg-slate-950/40 p-0 backdrop-blur-sm sm:p-4 md:items-center">
-          <div className="ai-widget-sheet h-[var(--ai-widget-vh,100dvh)] w-full rounded-none border-0 bg-[linear-gradient(180deg,#f8fafc_0%,#fff7ed_45%,#f0fdfa_100%)] p-2 shadow-glow sm:h-auto sm:w-[min(96vw,620px)] sm:rounded-[34px] sm:border sm:border-white/70 sm:p-4">
-            <div className="flex h-full flex-col rounded-[24px] bg-white/90 shadow-sm sm:max-h-[88vh]">
-              <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-4 py-4 sm:px-5">
+          <div className="ai-widget-sheet h-[var(--ai-widget-vh,100dvh)] w-full rounded-none border-0 bg-[linear-gradient(180deg,#f8fafc_0%,#fff7ed_45%,#f0fdfa_100%)] p-1 shadow-glow sm:h-auto sm:w-[min(96vw,620px)] sm:rounded-[34px] sm:border sm:border-white/70 sm:p-4">
+            <div className="flex h-full flex-col rounded-t-[26px] rounded-b-none bg-white/95 shadow-sm sm:max-h-[88vh] sm:rounded-[24px]">
+              <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-3 py-3 sm:px-5 sm:py-4">
                 <div className="min-w-0">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-orange-500">{resolvedAccent}</p>
-                  <h2 className="mt-2 text-lg font-bold text-ink sm:text-2xl">{resolvedTitle}</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-500">
+                  <h2 className="mt-2 text-[22px] font-bold leading-tight text-ink sm:text-2xl">{resolvedTitle}</h2>
+                  <p className="mt-2 text-[13px] leading-6 text-slate-500 sm:text-sm">
                     Opisz problem, dodaj zdjęcie lub wideo, a AI poprowadzi rozmowę i przygotuje orientacyjną wycenę.
                   </p>
                   {lastDetectedModel ? (
@@ -371,15 +371,15 @@ export function WidgetApp({ apiBaseUrl, title, accentLabel }) {
                 <button
                   type="button"
                   onClick={() => setIsOpen(false)}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-2xl text-slate-600 transition hover:bg-slate-200 sm:h-11 sm:w-11"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-xl text-slate-600 transition hover:bg-slate-200 sm:h-11 sm:w-11"
                   aria-label="Zamknij czat"
                 >
                   ×
                 </button>
               </div>
 
-              <div className="border-b border-slate-100 px-4 py-3 sm:px-5">
-                <div className="flex gap-2 overflow-x-auto pb-1">
+              <div className="border-b border-slate-100 px-3 py-3 sm:px-5">
+                <div className="flex flex-wrap gap-2 pb-1 sm:flex-nowrap sm:overflow-x-auto">
                   {QUICK_CHIPS.map((chip) => (
                     <button
                       key={chip}
@@ -394,13 +394,13 @@ export function WidgetApp({ apiBaseUrl, title, accentLabel }) {
                 </div>
               </div>
 
-              <div className="ai-widget-messages ai-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5">
+              <div className="ai-widget-messages ai-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-5 sm:py-4">
                 <div className="space-y-3">
                   {messages.map((item, index) => (
                     <div key={`${item.role}-${index}`} className={item.role === "user" ? "flex justify-end" : "flex justify-start"}>
                       <div
                         className={[
-                          "max-w-[92%] rounded-[22px] px-4 py-3 text-[13px] leading-6 sm:max-w-[86%] sm:text-sm",
+                          "max-w-[96%] rounded-[20px] px-4 py-3 text-[13px] leading-6 sm:max-w-[86%] sm:rounded-[22px] sm:text-sm",
                           item.role === "user"
                             ? "bg-gradient-to-r from-orange-500 to-cyan-600 text-white"
                             : "bg-slate-100 text-slate-700",
@@ -479,12 +479,12 @@ export function WidgetApp({ apiBaseUrl, title, accentLabel }) {
                     }}
                   />
 
-                  <div className="min-w-0 flex-1 rounded-[22px] border border-slate-200 bg-white px-3 py-3 shadow-sm sm:rounded-[24px] sm:px-4">
+                  <div className="min-w-0 flex-1 rounded-[20px] border border-slate-200 bg-white px-3 py-2 shadow-sm sm:rounded-[24px] sm:px-4 sm:py-3">
                     <textarea
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
-                      rows={2}
-                      className="max-h-28 w-full resize-none border-0 bg-transparent text-base leading-6 text-ink outline-none md:max-h-32 md:text-sm"
+                      rows={1}
+                      className="max-h-24 min-h-[26px] w-full resize-none border-0 bg-transparent text-base leading-6 text-ink outline-none md:max-h-32 md:text-sm"
                       placeholder="Np. iPhone X po upadku, dotyk działa, ale pękło szkło. Możesz też od razu podać imię i numer telefonu."
                     />
                   </div>
@@ -499,7 +499,7 @@ export function WidgetApp({ apiBaseUrl, title, accentLabel }) {
                   </button>
                 </div>
 
-                <p className="mt-3 text-[11px] leading-5 text-slate-500 sm:text-xs">
+                <p className="mt-2 text-[11px] leading-5 text-slate-500 sm:mt-3 sm:text-xs">
                   Obsługujemy telefony, tablety i inne urządzenia mobilne. AI może poprosić o model, opis objawów, imię i numer telefonu.
                 </p>
               </div>
