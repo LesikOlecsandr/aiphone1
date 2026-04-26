@@ -47,6 +47,16 @@ class ConsultantService:
         catalog_matches = self.catalog.find_best_matches(catalog_query)
         if strict_match and (not catalog_matches or catalog_matches[0].id != strict_match.id):
             catalog_matches = [strict_match, *catalog_matches][:3]
+        pricing_intent = self._is_pricing_intent(user_text)
+
+        if pricing_intent and len(catalog_matches) >= 2:
+            return self._build_catalog_options_reply(catalog_matches[:2])
+
+        if pricing_intent and strict_match:
+            return (
+                f"Dla tej naprawy mamy gotową pozycję w cenniku: {strict_match.title} za około {strict_match.base_price:.2f} PLN. "
+                "Jeśli chcesz, mogę od razu zapisać kontakt do serwisu albo podpowiedzieć, czy istnieje tańsza lub wyższa jakościowo opcja."
+            )
 
         if self.runtime.get_google_api_key():
             try:
@@ -68,6 +78,7 @@ class ConsultantService:
             f"{item.role.value}: {item.message_text}" for item in recent_messages
         )
         pricing_intent = self._is_pricing_intent(user_text)
+        should_request_media = self._should_request_media(lead, user_text, catalog_matches, strict_match)
         catalog_context = "\n".join(
             f"- {item.title}: {item.base_price} PLN. {item.description or ''}".strip()
             for item in catalog_matches
@@ -91,7 +102,9 @@ class ConsultantService:
             "Jesli problem sugeruje kilka scenariuszy, podaj maksymalnie 2 lub 3 najlepsze opcje. "
             "Jesli klient jest zainteresowany, zaproponuj zapis do serwisu i zbierz imie i nazwisko oraz numer telefonu, jesli ich jeszcze nie ma. "
             "Nie odsylaj tylko do telefonu. Prowadz klienta do zostawienia kontaktu w czacie. "
-            "Jesli brakuje modelu, dopytaj o model. Jesli brakuje mediow, popros o zdjecie lub krotkie video. "
+            "Jesli brakuje modelu, dopytaj o model. "
+            f"{'Mozesz poprosic o zdjecie lub krotkie video, ale tylko jesli bez mediow nie da sie realnie odroznic wariantu naprawy.' if should_request_media else 'Nie pros o zdjecie ani video, jesli juz da sie sensownie odpowiedziec bez mediow.'} "
+            "Jesli w katalogu sa dwa sensowne warianty tej samej naprawy, pokaz oba od razu zamiast prosic o media. "
             "Odpowiedz ma miec 2 do 3 krotkich zdan. "
             "Nie uzywaj markdown, gwiazdek, list punktowanych, naglowkow ani emoji. "
             "Pisz ladnie, naturalnie i po ludzku.\n\n"
@@ -126,6 +139,9 @@ class ConsultantService:
     def _fallback_reply(self, lead, user_text: str, catalog_matches, strict_match) -> str:
         """Heurystyczna odpowiedz, gdy AI jest niedostepne lub katalog juz wystarcza."""
 
+        if len(catalog_matches) >= 2 and self._is_pricing_intent(user_text):
+            return self._build_catalog_options_reply(catalog_matches[:2])
+
         if strict_match:
             return (
                 f"Dla tej naprawy mamy juz gotowa pozycje w cenniku: {strict_match.title}. "
@@ -151,13 +167,75 @@ class ConsultantService:
         if not lead.device_model_raw:
             return (
                 "Jasne, pomoge. Napisz prosze model urzadzenia i co dokladnie sie dzieje. "
-                "Mozesz tez od razu dolaczyc zdjecie albo krotkie video, wtedy podam trafniejsze warianty naprawy i w razie potrzeby poprosze o dane do zgloszenia."
+                "Jesli bez zdjecia lub video nie da sie odroznic wariantu naprawy, wtedy o nie poprosze."
+            )
+        if self._should_request_media(lead, user_text, catalog_matches, strict_match):
+            return (
+                f"Rozumiem. Dla modelu {lead.device_model_raw} moge przygotowac konkretniejsze warianty naprawy, ale tutaj zdjecie lub video faktycznie pomoze odroznic uszkodzenie. "
+                "Dolacz prosze media i napisz, co dokladnie przestalo dzialac, a wtedy zawęzę wycenę i warianty."
             )
         return (
-            f"Rozumiem. Dla modelu {lead.device_model_raw} moge przygotowac konkretne warianty naprawy. "
-            "Dolacz prosze jeszcze zdjecie albo video i napisz, co dokladnie przestalo dzialac. "
-            "Wtedy podam bardziej realna wycene i, jesli chcesz, pomoge od razu zostawic imie i numer do kontaktu."
+            f"Rozumiem. Dla modelu {lead.device_model_raw} moge juz podpowiedziec realne warianty naprawy bez proszenia o video. "
+            "Jesli chcesz, podam konkretne opcje cenowe albo od razu pomoge zostawic kontakt do serwisu."
         )
+
+    @staticmethod
+    def _build_catalog_options_reply(catalog_matches) -> str:
+        """Pokazuje dwa katalogowe warianty naprawy od razu, bez zbędnego dopytywania."""
+
+        options = [
+            f"{item.title} - około {item.base_price:.2f} PLN"
+            for item in catalog_matches[:2]
+        ]
+        if len(options) == 1:
+            return f"Mamy taki wariant w cenniku: {options[0]}. Jeśli chcesz, mogę od razu zapisać kontakt do serwisu."
+        return (
+            f"U nas są dwa sensowne warianty tej naprawy: {options[0]} oraz {options[1]}. "
+            "Jeśli chcesz, od razu podpowiem, czym się różnią i który wariant bardziej się opłaca."
+        )
+
+    def _should_request_media(self, lead, user_text: str, catalog_matches, strict_match) -> bool:
+        """Prosi o media tylko wtedy, gdy bez nich nie da się sensownie odróżnić wariantu naprawy."""
+
+        if lead.media_assets:
+            return False
+        if strict_match or len(catalog_matches) >= 2:
+            return False
+
+        text = (user_text or "").lower()
+        explicit_symptoms = [
+            "bateria",
+            "akumulator",
+            "nie laduje",
+            "nie ładuje",
+            "wirus",
+            "virus",
+            "windows",
+            "reinstalacja",
+            "instalacja",
+            "zawias",
+            "klawiatura",
+            "glosnik",
+            "głośnik",
+            "mikrofon",
+        ]
+        if any(token in text for token in explicit_symptoms):
+            return False
+
+        visual_damage = [
+            "ekran",
+            "wyswietlacz",
+            "wyświetlacz",
+            "szklo",
+            "szybka",
+            "plecki",
+            "plecy",
+            "obudowa",
+            "zbity",
+            "pęk",
+            "pek",
+        ]
+        return any(token in text for token in visual_damage)
 
     @staticmethod
     def _clean_response(text: str) -> str:
