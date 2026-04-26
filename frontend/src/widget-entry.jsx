@@ -5,7 +5,7 @@ import styles from "./index.css?inline";
 import { WidgetApp } from "./WidgetApp";
 
 const DEFAULT_OPTIONS = {
-  apiBaseUrl: "",
+  apiBaseUrl: typeof window !== "undefined" ? window.location.origin : "",
   title: "Wycena naprawy",
   accentLabel: "AI Diagnostyka",
 };
@@ -68,12 +68,8 @@ function autoInitFromScriptTag() {
   }
 
   const apiBaseUrl = currentScript.dataset.apiBaseUrl;
-  if (!apiBaseUrl) {
-    return;
-  }
-
   init({
-    apiBaseUrl,
+    apiBaseUrl: apiBaseUrl || window.location.origin,
     title: currentScript.dataset.title || DEFAULT_OPTIONS.title,
     accentLabel: currentScript.dataset.accentLabel || DEFAULT_OPTIONS.accentLabel,
   });
