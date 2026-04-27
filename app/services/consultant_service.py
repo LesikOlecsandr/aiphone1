@@ -6,7 +6,7 @@ from app.services.runtime_config_service import RuntimeConfigService
 
 
 class ConsultantService:
-    """Prowadzi rozmowe z klientem jak konsultant serwisu i korzysta z katalogu napraw."""
+    """Konsultant sprzedazowy, ktory rozmawia naturalnie, wyjasnia roznice i prowadzi do leada."""
 
     def __init__(self, db) -> None:
         self.db = db
@@ -15,9 +15,65 @@ class ConsultantService:
         self.runtime = RuntimeConfigService()
 
     def build_reply(self, lead, user_text: str) -> str:
-        """Buduje odpowiedz konsultanta, najpierw z katalogu napraw, potem z AI lub heurystyki."""
+        """Buduje odpowiedz konsultanta na podstawie kontekstu, katalogu i intencji klienta."""
 
-        model_guess = self.matcher.find_best_match(user_text, score_cutoff=82)
+        user_text = (user_text or "").strip()
+        self._update_lead_snapshot_from_text(lead, user_text)
+
+        closing_reply = self._try_build_closing_reply(lead, user_text)
+        if closing_reply:
+            return closing_reply
+
+        history_text = self._history_context(lead)
+        topic = self._detect_topic(f"{history_text} {user_text}")
+        catalog_query = " ".join(filter(None, [lead.device_model_raw, topic, history_text, user_text]))
+        catalog_matches = self.catalog.find_best_matches(catalog_query, limit=5)
+        strict_match = self.catalog.find_strict_match(catalog_query)
+        if strict_match and all(item.id != strict_match.id for item in catalog_matches):
+            catalog_matches = [strict_match, *catalog_matches][:5]
+        variant_matches = self._find_variant_matches(catalog_matches)
+
+        if not lead.device_model_raw and topic != "unknown":
+            return (
+                "Jasne, pomoge. Napisz prosze dokladny model urzadzenia, a od razu porownam dostepne warianty naprawy, "
+                "wyjasnie roznice i podpowiem, co bedzie najbardziej oplacalne."
+            )
+
+        if self._is_explanation_request(user_text) and variant_matches:
+            return self._build_explanation_reply(variant_matches)
+
+        if self._is_recommendation_request(user_text) and variant_matches:
+            return self._build_recommendation_reply(variant_matches)
+
+        if (self._is_pricing_intent(user_text) or self._is_option_request(user_text)) and variant_matches:
+            return self._build_variant_offer_reply(lead, variant_matches)
+
+        if self._should_request_media(lead, topic, variant_matches, strict_match):
+            return (
+                f"Dla modelu {lead.device_model_raw} moge juz wstepnie podpowiedziec kierunek, ale tutaj zdjecie lub krotkie video naprawde pomoze rozroznic wariant naprawy. "
+                "Jesli dolaczysz media, zawęże opcje i podam bardziej trafna wycene."
+            )
+
+        if strict_match:
+            return (
+                f"Dla {lead.device_model_raw} mamy gotowa pozycje: {strict_match.title} za okolo {strict_match.base_price:.2f} PLN. "
+                f"{self._clean_sentence(strict_match.description) or 'Jesli chcesz, porownam ten wariant z innymi opcjami i podpowiem, co bedzie najrozsadniejsze.'}"
+            )
+
+        if catalog_matches:
+            return self._build_soft_catalog_reply(lead, catalog_matches)
+
+        if self.runtime.get_google_api_key():
+            ai_reply = self._ask_gemini_fallback(lead, user_text, history_text, topic)
+            if ai_reply:
+                return ai_reply
+
+        return self._generic_consultant_reply(lead, topic)
+
+    def _update_lead_snapshot_from_text(self, lead, user_text: str) -> None:
+        """Aktualizuje model, telefon i dane klienta na podstawie tekstu bez gubienia kontekstu."""
+
+        model_guess = self.matcher.find_best_match(user_text, score_cutoff=86)
         if model_guess:
             lead.device_model_raw = f"{model_guess.brand} {model_guess.model_name}"
             lead.matched_device_id = model_guess.id
@@ -30,351 +86,257 @@ class ConsultantService:
         if phone_match:
             lead.phone = phone_match.group(1).strip()
 
-        name_match = re.search(r"(?:mam na imie|nazywam sie|to ja)\s+([A-Za-zÀ-ÿ' -]{2,80})", user_text, re.IGNORECASE)
-        if name_match:
-            lead.customer_name = name_match.group(1).strip(" .,-")
+        explicit_name = re.search(r"(?:mam na imie|nazywam sie|to ja)\s+([A-Za-zÀ-ÿ' -]{2,80})", user_text, re.IGNORECASE)
+        if explicit_name:
+            lead.customer_name = explicit_name.group(1).strip(" .,-")
         elif phone_match and not lead.customer_name:
-            inline_name = re.sub(r"\+?\d[\d\-\s]{7,}\d", "", user_text).strip(" ,.-")
-            if inline_name and len(inline_name.split()) >= 2 and any(char.isalpha() for char in inline_name):
-                lead.customer_name = inline_name[:120]
+            possible_name = re.sub(r"\+?\d[\d\-\s]{7,}\d", "", user_text).strip(" ,.-")
+            if possible_name and len(possible_name.split()) >= 2 and any(char.isalpha() for char in possible_name):
+                lead.customer_name = possible_name[:120]
 
-        closing_reply = self._try_build_closing_reply(lead, user_text)
-        if closing_reply:
-            return closing_reply
+    def _build_variant_offer_reply(self, lead, variants) -> str:
+        """Buduje konsultacyjna odpowiedz z wariantami i roznicami."""
 
-        history_text = self._history_context(lead)
-        catalog_query = " ".join(filter(None, [lead.device_model_raw, history_text, user_text]))
-        strict_match = self.catalog.find_strict_match(catalog_query)
-        catalog_matches = self.catalog.find_best_matches(catalog_query)
-        if strict_match and (not catalog_matches or catalog_matches[0].id != strict_match.id):
-            catalog_matches = [strict_match, *catalog_matches][:3]
-        pricing_intent = self._is_pricing_intent(user_text)
-        variant_matches = self._find_variant_matches(catalog_matches)
-        if self._is_explanation_request(user_text) and catalog_matches:
-            return self._build_explanation_reply(catalog_matches[0], variant_matches[:3])
-
-        if (pricing_intent or self._is_option_request(user_text)) and len(variant_matches) >= 2:
-            return self._build_catalog_options_reply(variant_matches[:3])
-
-        if pricing_intent and strict_match:
-            return (
-                f"Dla tej naprawy mamy gotową pozycję w cenniku: {strict_match.title} za około {strict_match.base_price:.2f} PLN. "
-                f"{strict_match.description or 'Jeśli chcesz, mogę też porównać ten wariant z tańszą albo lepszą jakościowo opcją.'}"
-            )
-
-        if self.runtime.get_google_api_key():
-            try:
-                return self._ask_gemini(lead, user_text, catalog_matches, strict_match, variant_matches)
-            except Exception:
-                pass
-        return self._fallback_reply(lead, user_text, catalog_matches, strict_match, variant_matches)
-
-    def _ask_gemini(self, lead, user_text: str, catalog_matches, strict_match, variant_matches) -> str:
-        """Uzywa Gemini jako konsultanta, podajac katalog i historie rozmowy."""
-
-        from google import genai
-        from google.genai import types
-
-        config = self.runtime.load()
-        client = genai.Client(api_key=self.runtime.get_google_api_key())
-        recent_messages = lead.messages[-8:] if lead.messages else []
-        history = "\n".join(
-            f"{item.role.value}: {item.message_text}" for item in recent_messages
+        variants = variants[:3]
+        options = [f"{item.title} za okolo {item.base_price:.2f} PLN" for item in variants]
+        joined = ", ".join(options[:-1]) + f" oraz {options[-1]}" if len(options) > 1 else options[0]
+        difference = self._summarize_variant_difference(variants)
+        return (
+            f"Dla {lead.device_model_raw} widze kilka realnych opcji: {joined}. "
+            f"{difference} "
+            "Jesli chcesz, od razu podpowiem, ktory wariant bedzie najlepszy przy nizszym budzecie, a ktory jest najbezpieczniejszy na dluzszy czas."
         )
-        pricing_intent = self._is_pricing_intent(user_text)
-        should_request_media = self._should_request_media(lead, user_text, catalog_matches, strict_match)
-        catalog_context = "\n".join(
-            f"- {item.title}: {item.base_price} PLN. {item.description or ''}".strip()
-            for item in catalog_matches
-        ) or "Brak bezposredniego dopasowania w katalogu napraw."
-        variant_context = "\n".join(
-            f"- {item.title}: {item.base_price} PLN. {item.description or ''}".strip()
-            for item in variant_matches
-        ) or "Brak kilku wyraznych wariantow tej samej naprawy."
-        media_note = (
-            "Klient dolaczyl media do zgloszenia."
-            if lead.media_assets
-            else "Klient jeszcze nie dolaczyl mediow."
+
+    def _build_explanation_reply(self, variants) -> str:
+        """Wyjasnia, co oznacza wybrany wariant i czym rozni sie od innych."""
+
+        chosen = variants[0]
+        difference = self._summarize_variant_difference(variants)
+        description = self._clean_sentence(chosen.description)
+        return (
+            f"W praktyce chodzi o wariant {chosen.title} za okolo {chosen.base_price:.2f} PLN. "
+            f"{description or difference} "
+            "Jesli chcesz, porownam to od razu z pozostalymi opcjami i powiem, co bardziej sie oplaca."
         )
-        prompt = (
-            "Jestes ekspertem serwisu Apple/Samsung oraz laptopow z Windows. "
-            "Rozmawiaj po polsku, badz uprzejmy i profesjonalny. "
-            "Twoim celem jest nie tylko doradzic, ale tez delikatnie zamienic rozmowe w realne zgloszenie serwisowe. "
-            "Prowadz rozmowe jak realny konsultant, dawaj sensowne warianty naprawy, ale odpowiadaj krotko i konkretnie. "
-            "Najpierw sprawdz katalog napraw i jesli pasuje, wykorzystaj te ceny jako priorytet. "
-            "Jesli jest scisle dopasowana usluga w katalogu, nie podawaj wyzszej ceny niz katalogowa bez bardzo wyraznego uzasadnienia. "
-            "Jesli klient pyta o cene, dla Apple najpierw bierz ceny z iflix jako glowny punkt odniesienia, a dopiero potem z innych polskich serwisow. "
-            "Nie zawyzaj cen wzgledem iflix. Jesli iflix ma nizsza i sensowna cene, trzymaj sie jej lub bardzo bliskiego zakresu. "
-            "Jesli klient zostawil juz imie i telefon oraz potwierdza kontakt, zakoncz rozmowe krotko i uprzejmie bez dalszych pytan. "
-            "Jesli nie ma dopasowania, mozesz podac orientacyjne warianty i zaznacz, ze to wstepna konsultacja. "
-            "Jesli problem sugeruje kilka scenariuszy, podaj maksymalnie 2 lub 3 najlepsze opcje i w jednym zdaniu wyjasnij roznice miedzy nimi. "
-            "Jesli w katalogu sa 2 lub 3 sensowne warianty tej samej naprawy, pokaz je od razu wszystkie i wyjasnij roznice w jakosci, trwalosci albo zakresie uslugi. "
-            "Jesli klient jest zainteresowany, zaproponuj zapis do serwisu i zbierz imie i nazwisko oraz numer telefonu, jesli ich jeszcze nie ma. "
-            "Nie odsylaj tylko do telefonu. Prowadz klienta do zostawienia kontaktu w czacie. "
-            "Jesli brakuje modelu, dopytaj o model. "
-            f"{'Mozesz poprosic o zdjecie lub krotkie video, ale tylko jesli bez mediow nie da sie realnie odroznic wariantu naprawy.' if should_request_media else 'Nie pros o zdjecie ani video, jesli juz da sie sensownie odpowiedziec bez mediow.'} "
-            "Jesli w katalogu sa dwa sensowne warianty tej samej naprawy, pokaz oba od razu zamiast prosic o media. "
-            "Odpowiedz ma miec 3 do 5 krotkich zdan. "
-            "Nie uzywaj markdown, gwiazdek, list punktowanych, naglowkow ani emoji. "
-            "Pisz ladnie, naturalnie i po ludzku.\n\n"
-            f"Scisle dopasowanie katalogowe: {strict_match.title if strict_match else 'brak'} | "
-            f"cena: {f'{strict_match.base_price:.2f} PLN' if strict_match else 'brak'}\n\n"
-            f"Warianty tej samej naprawy:\n{variant_context}\n\n"
-            f"Dane serwisu:\n"
-            f"Nazwa: {config.get('business_name') or 'Serwis'}\n"
-            f"Telefon: {config.get('business_phone') or 'brak'}\n"
-            f"E-mail: {config.get('business_email') or 'brak'}\n"
-            f"Adres: {config.get('business_address') or 'brak'}\n"
-            f"Godziny pracy: {config.get('working_hours') or 'brak'}\n\n"
-            f"Dane klienta:\n"
-            f"Imie i nazwisko: {lead.customer_name or 'brak'}\n"
-            f"Telefon: {lead.phone or 'brak'}\n"
-            f"Model: {lead.device_model_raw or 'nieznany'}\n"
-            f"{media_note}\n\n"
-            f"Katalog napraw:\n{catalog_context}\n\n"
-            f"Historia rozmowy:\n{history}\n\n"
-            f"Ostatnia wiadomosc klienta: {user_text}"
+
+    def _build_recommendation_reply(self, variants) -> str:
+        """Rekomenduje najlepszy wariant zalezenie od jakosci lub budzetu."""
+
+        best_quality = self._pick_best_quality_variant(variants)
+        best_budget = min(variants, key=lambda item: item.base_price)
+        if best_quality.id == best_budget.id:
+            return (
+                f"Najrozsadniej wyglada teraz {best_quality.title} za okolo {best_quality.base_price:.2f} PLN, bo dobrze laczy koszt i efekt naprawy. "
+                "Jesli chcesz, moge od razu zapisac kontakt do serwisu albo odpowiedziec, jak ta opcja wypada pod wzgledem trwalosci."
+            )
+        return (
+            f"Jesli chcesz zejsc z kosztem, najtanszy bedzie {best_budget.title} za okolo {best_budget.base_price:.2f} PLN. "
+            f"Jesli zalezy Ci bardziej na spokoju i jakosci, lepszym wyborem bedzie {best_quality.title} za okolo {best_quality.base_price:.2f} PLN. "
+            "Moge od razu powiedziec, dla kogo lepsza jest kazda z tych opcji."
         )
-        response = client.models.generate_content(
-            model=self.runtime.get_gemini_model(),
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.5,
-                tools=[types.Tool(google_search=types.GoogleSearch())] if pricing_intent else None,
-            ),
+
+    def _build_soft_catalog_reply(self, lead, catalog_matches) -> str:
+        """Daje naturalna odpowiedz, gdy jest sensowny kierunek, ale nie ma twardego kompletu wariantow."""
+
+        top = catalog_matches[0]
+        description = self._clean_sentence(top.description)
+        return (
+            f"Wyglada na to, ze dla {lead.device_model_raw} najblizsza usluga to {top.title} za okolo {top.base_price:.2f} PLN. "
+            f"{description or 'Jesli chcesz, moge sprawdzic, czy mamy tez tansza albo mocniejsza opcje i od razu wyjasnic roznice.'}"
         )
-        cleaned = self._clean_response(response.text or "")
-        return cleaned or self._fallback_reply(lead, user_text, catalog_matches, strict_match, variant_matches)
 
-    def _fallback_reply(self, lead, user_text: str, catalog_matches, strict_match, variant_matches) -> str:
-        """Heurystyczna odpowiedz, gdy AI jest niedostepne lub katalog juz wystarcza."""
+    def _generic_consultant_reply(self, lead, topic: str) -> str:
+        """Odpowiedz awaryjna, ale nadal konsultacyjna i leadowa."""
 
-        if len(variant_matches) >= 2 and (self._is_pricing_intent(user_text) or self._is_option_request(user_text)):
-            return self._build_catalog_options_reply(variant_matches[:3])
-
-        if strict_match:
-            return (
-                f"Dla tej naprawy mamy juz gotowa pozycje w cenniku: {strict_match.title}. "
-                f"Orientacyjna cena to {strict_match.base_price:.2f} PLN. "
-                f"{strict_match.description or 'Jesli chcesz, moge porownac ten wariant z inna opcja albo od razu zapisac kontakt do serwisu.'}"
-            )
-
-        if catalog_matches:
-            top = catalog_matches[0]
-            return (
-                f"Wyglada na to, ze mamy podobna usluge w katalogu: {top.title}. "
-                f"Orientacyjna cena startuje od {top.base_price:.2f} PLN. "
-                f"{top.description or 'Jesli chcesz, moge od razu zapisac kontakt do oddzwonienia albo wizyty.'}"
-            )
-
-        text = user_text.lower()
-        if "wirus" in text or "virus" in text or "windows" in text:
-            return (
-                "Widze tu dwa sensowne warianty. Jesli system jeszcze dziala stabilnie, zwykle wystarcza porzadne czyszczenie i usuniecie zagrozen. "
-                "Jesli problem wraca albo Windows mocno zwalnia, bezpieczniejsza bywa pelna reinstalacja systemu. "
-                "Moge od razu podpowiedziec, co obejmuje kazda opcja i w razie potrzeby zapisac Twoj numer do kontaktu."
-            )
         if not lead.device_model_raw:
             return (
-                "Jasne, pomoge. Napisz prosze model urzadzenia i co dokladnie sie dzieje. "
-                "Jesli bez zdjecia lub video nie da sie odroznic wariantu naprawy, wtedy o nie poprosze."
+                "Jasne, pomoge. Podaj prosze model urzadzenia i opisz objaw, a od razu powiem, jakie sa realne warianty naprawy i co najbardziej sie oplaca."
             )
-        if self._should_request_media(lead, user_text, catalog_matches, strict_match):
+        if topic == "battery":
             return (
-                f"Rozumiem. Dla modelu {lead.device_model_raw} moge przygotowac konkretniejsze warianty naprawy, ale tutaj zdjecie lub video faktycznie pomoze odroznic uszkodzenie. "
-                "Dolacz prosze media i napisz, co dokladnie przestalo dzialac, a wtedy zawęzę wycenę i warianty."
+                f"Dla {lead.device_model_raw} moge porownac kilka wariantow wymiany baterii i wyjasnic, czym beda sie roznily pod wzgledem ceny, jakosci i komunikatow systemowych. "
+                "Jesli chcesz, od razu przejde do konkretnych opcji."
             )
         return (
-            f"Rozumiem. Dla modelu {lead.device_model_raw} moge juz podpowiedziec realne warianty naprawy bez proszenia o video. "
-            "Jesli chcesz, podam konkretne opcje cenowe albo od razu pomoge zostawic kontakt do serwisu."
+            f"Dla {lead.device_model_raw} moge przeanalizowac najlepsze warianty naprawy i podpowiedziec, ktore rozwiazanie bedzie najbardziej rozsadne cenowo. "
+            "Jesli chcesz, przejde od razu do konkretow."
         )
 
-    def _build_catalog_options_reply(self, catalog_matches) -> str:
-        """Pokazuje dwa katalogowe warianty naprawy od razu, bez zbędnego dopytywania."""
+    def _ask_gemini_fallback(self, lead, user_text: str, history_text: str, topic: str) -> str | None:
+        """Uzywa Gemini tylko jako awaryjnego konsultanta, gdy katalog nie daje dobrej odpowiedzi."""
 
-        variants = catalog_matches[:3]
-        if len(variants) == 1:
-            item = variants[0]
-            return f"Mamy taki wariant w cenniku: {item.title} za około {item.base_price:.2f} PLN. Jeśli chcesz, mogę od razu zapisać kontakt do serwisu."
+        try:
+            from google import genai
+            from google.genai import types
+        except Exception:
+            return None
 
-        pieces = [f"{item.title} - około {item.base_price:.2f} PLN" for item in variants]
-        difference = self._summarize_variant_difference(variants)
-        joined = ", ".join(pieces[:-1]) + f" oraz {pieces[-1]}" if len(pieces) > 1 else pieces[0]
-        return (
-            f"Dla tej naprawy widzę kilka sensownych opcji: {joined}. "
-            f"{difference} Jeśli chcesz, pomogę dobrać najlepszy wariant pod budżet albo od razu zapiszę kontakt do serwisu."
-        )
-
-    def _build_explanation_reply(self, selected_item, variant_matches) -> str:
-        """Wyjaśnia klientowi, co oznacza dany wariant i czym różni się od innych."""
-
-        description = (selected_item.description or "").strip()
-        if len(variant_matches) >= 2:
-            difference = self._summarize_variant_difference(variant_matches)
-            return (
-                f"W tym wariancie chodzi o pozycję {selected_item.title} za około {selected_item.base_price:.2f} PLN. "
-                f"{description or difference} "
-                "Jeśli chcesz, mogę od razu porównać go z pozostałymi opcjami i podpowiedzieć, co bardziej się opłaca."
+        try:
+            client = genai.Client(api_key=self.runtime.get_google_api_key())
+            config = self.runtime.load()
+            prompt = (
+                "Jestes bardzo dobrym konsultantem serwisu elektroniki. "
+                "Rozmawiaj po polsku, naturalnie i konkretnie. "
+                "Twoim zadaniem jest wyjasnic problem klienta, zaproponowac najlepsze rozwiazania i delikatnie prowadzic do zostawienia kontaktu. "
+                "Nie pisz jak bot. Nie uzywaj markdown ani list. "
+                "Odpowiedz w 3 do 5 zdaniach. "
+                "Jesli sa co najmniej 2 realne warianty, nazwij je i wyjasnij roznice. "
+                "Pros o zdjecie albo video tylko wtedy, gdy bez tego nie da sie sensownie zawezic diagnozy. "
+                "Dla Apple trzymaj sie cen z iflix lub bardzo blisko nich. "
+                f"Nazwa serwisu: {config.get('business_name') or 'Serwis'}\n"
+                f"Telefon serwisu: {config.get('business_phone') or 'brak'}\n"
+                f"Godziny pracy: {config.get('working_hours') or 'brak'}\n"
+                f"Model klienta: {lead.device_model_raw or 'nieznany'}\n"
+                f"Temat: {topic}\n"
+                f"Historia: {history_text}\n"
+                f"Ostatnia wiadomosc klienta: {user_text}"
             )
-        return (
-            f"Chodzi o wariant {selected_item.title} za około {selected_item.base_price:.2f} PLN. "
-            f"{description or 'To po prostu opis zakresu tej konkretnej usługi.'} "
-            "Jeśli chcesz, wyjaśnię dokładnie, co wchodzi w tę cenę."
-        )
-
-    def _summarize_variant_difference(self, variants) -> str:
-        """Buduje krótkie wyjaśnienie różnic między wariantami katalogowymi."""
-
-        joined_descriptions = " ".join((item.description or "").lower() for item in variants)
-        joined_titles = " ".join((item.title or "").lower() for item in variants)
-        text = f"{joined_titles} {joined_descriptions}"
-
-        if "oryg" in text and ("zamien" in text or "copy" in text):
-            return "Zwykle tańsza opcja jest bardziej budżetowa, a oryginał daje lepszą jakość i większy spokój na dłużej."
-        if "premium" in text and ("zamien" in text or "oryg" in text):
-            return "Różnica zwykle wynika z jakości części albo poziomu wykonania usługi."
-        if "program" in text:
-            return "Różnica wynika głównie z zakresu usługi, na przykład z programowania lub dodatkowej konfiguracji."
-        return "Różnica najczęściej dotyczy jakości części, trwałości albo zakresu wykonanej usługi."
+            response = client.models.generate_content(
+                model=self.runtime.get_gemini_model(),
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.45),
+            )
+            cleaned = self._clean_response(response.text or "")
+            return cleaned or None
+        except Exception:
+            return None
 
     def _find_variant_matches(self, catalog_matches):
-        """Wybiera warianty tej samej naprawy, aby móc pokazać klientowi więcej niż jedną opcję."""
+        """Szuka wariantow tej samej uslugi na podstawie nazw i opisow."""
 
         if len(catalog_matches) < 2:
             return catalog_matches
 
         def family_key(item) -> str:
             text = f"{getattr(item, 'title', '')} {getattr(item, 'description', '')}".lower()
-            stop_words = [
-                "oryginal",
-                "oryginał",
-                "zamiennik",
-                "premium",
-                "copy",
-                "bez programowania",
-                "z programowaniem",
-                "programowanie",
-            ]
-            for token in stop_words:
+            for token in [
+                "oryginal", "oryginał", "zamiennik", "premium", "copy",
+                "bez przypisania", "z przypisaniem", "przypisanie",
+                "bez programowania", "z programowaniem", "programowanie",
+            ]:
                 text = text.replace(token, " ")
             return " ".join(text.split())
 
         first_key = family_key(catalog_matches[0])
-        variants = [item for item in catalog_matches if family_key(item) == first_key]
-        return variants if len(variants) >= 2 else catalog_matches
+        same_family = [item for item in catalog_matches if family_key(item) == first_key]
+        return same_family if len(same_family) >= 2 else catalog_matches
+
+    def _summarize_variant_difference(self, variants) -> str:
+        """Streszcza sens roznic miedzy wariantami tak, jak tlumaczylby to handlowiec."""
+
+        titles = " ".join((item.title or "").lower() for item in variants)
+        descriptions = " ".join((item.description or "").lower() for item in variants)
+        combined = f"{titles} {descriptions}"
+
+        if "oryg" in combined and ("zamien" in combined or "copy" in combined):
+            return "Tanszy wariant zwykle pozwala zejsc z kosztem, a oryginal daje lepsza jakosc i wiekszy spokoj na dluzszy czas."
+        if "przypis" in combined:
+            return "Roznica polega glownie na tym, czy bateria jest przypisana do systemu, co moze miec znaczenie dla komunikatow i wygody uzytkowania."
+        if "program" in combined:
+            return "Roznica wynika glownie z zakresu uslugi, na przyklad z dodatkowej konfiguracji lub programowania."
+        if "premium" in combined:
+            return "Roznica dotyczy glownie jakosci czesci i przewidywanej trwalosci po naprawie."
+        return "Roznica dotyczy najczesciej jakosci czesci, trwalosci albo zakresu wykonanej uslugi."
+
+    def _pick_best_quality_variant(self, variants):
+        """Wybiera wariant, ktory brzmi najlepiej jakosciowo."""
+
+        def score(item):
+            text = f"{item.title} {item.description or ''}".lower()
+            value = 0
+            if "oryg" in text:
+                value += 4
+            if "premium" in text:
+                value += 3
+            if "zamien" in text:
+                value += 1
+            if "przypis" in text:
+                value += 1
+            return (value, item.base_price)
+
+        return sorted(variants, key=score, reverse=True)[0]
+
+    def _should_request_media(self, lead, topic: str, variant_matches, strict_match) -> bool:
+        """Media prosimy tylko wtedy, gdy bez nich nie da sie sensownie odroznic uszkodzenia wizualnego."""
+
+        if lead.media_assets or strict_match or len(variant_matches) >= 2:
+            return False
+        return topic in {"screen", "glass", "body", "water"}
+
+    @staticmethod
+    def _detect_topic(text: str) -> str:
+        value = (text or "").lower()
+        if any(token in value for token in ["bateria", "akumulator", "slabo trzyma", "słabo trzyma", "nie laduje", "nie ładuje"]):
+            return "battery"
+        if any(token in value for token in ["ekran", "wyswietlacz", "wyświetlacz", "dotyk", "lcd", "oled"]):
+            return "screen"
+        if any(token in value for token in ["szklo", "szybka", "plecki", "plecy", "obudowa", "klapka"]):
+            return "body"
+        if any(token in value for token in ["zalany", "woda", "po zalaniu"]):
+            return "water"
+        if any(token in value for token in ["wirus", "virus", "windows", "reinstalacja", "system"]):
+            return "software"
+        return "unknown"
+
+    @staticmethod
+    def _is_pricing_intent(text: str) -> bool:
+        value = (text or "").lower()
+        return any(token in value for token in ["ile kosztuje", "jaka cena", "koszt", "wycena", "cena"])
+
+    @staticmethod
+    def _is_option_request(text: str) -> bool:
+        value = (text or "").lower()
+        return any(token in value for token in [
+            "inna opcja", "inne opcje", "sa jeszcze", "są jeszcze", "czy jest cos tanszego",
+            "czy jest coś tańszego", "da sie na", "da się na", "zamiennik", "oryginal", "oryginał",
+            "propozycje", "wariant", "warianty",
+        ])
+
+    @staticmethod
+    def _is_recommendation_request(text: str) -> bool:
+        value = (text or "").lower()
+        return any(token in value for token in [
+            "co polecasz", "co lepsze", "ktore lepsze", "które lepsze", "co bardziej sie oplaca",
+            "co bardziej się opłaca", "co wybrac", "co wybrać", "najlepsze rozwiazanie", "najlepsze rozwiązanie",
+        ])
+
+    @staticmethod
+    def _is_explanation_request(text: str) -> bool:
+        value = (text or "").lower()
+        return any(token in value for token in [
+            "co znaczy", "co to znaczy", "jaka roznica", "jaka różnica",
+            "czym sie rozni", "czym się różni", "o co chodzi", "wyjasnij", "wyjaśnij",
+        ])
 
     @staticmethod
     def _history_context(lead) -> str:
-        """Buduje krótki kontekst z ostatnich wiadomości, aby follow-upy działały lepiej."""
-
         if not getattr(lead, "messages", None):
             return ""
         recent = [item.message_text for item in lead.messages[-6:] if getattr(item, "message_text", None)]
         return " ".join(recent)
 
-    def _should_request_media(self, lead, user_text: str, catalog_matches, strict_match) -> bool:
-        """Prosi o media tylko wtedy, gdy bez nich nie da się sensownie odróżnić wariantu naprawy."""
-
-        if lead.media_assets:
-            return False
-        if strict_match or len(catalog_matches) >= 2:
-            return False
-
-        text = (user_text or "").lower()
-        explicit_symptoms = [
-            "bateria",
-            "akumulator",
-            "nie laduje",
-            "nie ładuje",
-            "wirus",
-            "virus",
-            "windows",
-            "reinstalacja",
-            "instalacja",
-            "zawias",
-            "klawiatura",
-            "glosnik",
-            "głośnik",
-            "mikrofon",
-        ]
-        if any(token in text for token in explicit_symptoms):
-            return False
-
-        visual_damage = [
-            "ekran",
-            "wyswietlacz",
-            "wyświetlacz",
-            "szklo",
-            "szybka",
-            "plecki",
-            "plecy",
-            "obudowa",
-            "zbity",
-            "pęk",
-            "pek",
-        ]
-        return any(token in text for token in visual_damage)
-
     @staticmethod
-    def _is_option_request(text: str) -> bool:
-        """Rozpoznaje pytania o inne warianty lub tańszą opcję."""
-
-        value = (text or "").lower()
-        signals = [
-            "inna opcja",
-            "inne opcje",
-            "da sie na",
-            "da się na",
-            "jest tansza",
-            "jest tańsza",
-            "sa jeszcze",
-            "są jeszcze",
-            "czy macie",
-            "mozna taniej",
-            "można taniej",
-            "zamiennik",
-            "oryginal",
-            "oryginał",
-        ]
-        return any(signal in value for signal in signals)
-
-    @staticmethod
-    def _is_explanation_request(text: str) -> bool:
-        """Rozpoznaje pytania typu 'co to znaczy' albo 'jaka jest różnica'."""
-
-        value = (text or "").lower()
-        signals = [
-            "co znaczy",
-            "co to znaczy",
-            "jaka roznica",
-            "jaka różnica",
-            "czym sie rozni",
-            "czym się różni",
-            "o co chodzi",
-            "wyjasnij",
-            "wyjaśnij",
-        ]
-        return any(signal in value for signal in signals)
+    def _clean_sentence(text: str | None) -> str:
+        value = re.sub(r"\s+", " ", (text or "").strip())
+        return value
 
     @staticmethod
     def _clean_response(text: str) -> str:
-        """Czysci odpowiedz modelu z markdown i skraca ja do kilku zdan."""
-
         cleaned = re.sub(r"[*_#`>-]+", " ", text or "")
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         if not cleaned:
             return ""
         sentences = re.split(r"(?<=[.!?])\s+", cleaned)
-        return " ".join(sentence.strip() for sentence in sentences[:4] if sentence.strip())
+        return " ".join(sentence.strip() for sentence in sentences[:5] if sentence.strip())
 
     @staticmethod
     def _extract_device_reference(text: str) -> str | None:
-        """Probuje wyciagnac model urzadzenia nawet wtedy, gdy nie ma go w lokalnej bazie."""
-
         patterns = [
             r"(iphone\s?(?:se|x|xr|xs|11|12|13|14|15|16)(?:\s?(?:pro|max|mini|plus))?)",
+            r"(ipad\s?[a-z0-9+\- ]{1,20})",
             r"(samsung\s+galaxy\s?[a-z0-9+\- ]{1,20})",
             r"(galaxy\s?[a-z0-9+\- ]{1,20})",
+            r"(macbook\s?[a-z0-9+\- ]{0,20})",
         ]
         source = (text or "").lower()
         for pattern in patterns:
@@ -384,24 +346,13 @@ class ConsultantService:
         return None
 
     @staticmethod
-    def _is_pricing_intent(text: str) -> bool:
-        """Sprawdza, czy klient pyta glownie o koszt lub rodzaje naprawy."""
-
-        value = (text or "").lower()
-        keywords = ["ile kosztuje", "jaka cena", "koszt", "wycena", "cena", "rodzaje naprawy"]
-        return any(keyword in value for keyword in keywords)
-
-    @staticmethod
     def _try_build_closing_reply(lead, user_text: str) -> str | None:
-        """Zamyka rozmowe krotko, gdy lead jest juz kompletny i klient potwierdza kontakt."""
-
         if not (lead.customer_name and lead.phone):
             return None
         text = (user_text or "").lower().strip()
-        closing_signals = ["dziękuję", "dziekuje", "do zobaczenia", "ok", "okej", "tak", "pasuje", "będzie", "bedzie", "super"]
-        if any(signal in text for signal in closing_signals) and len(text.split()) <= 6:
+        if any(token in text for token in ["dziekuje", "dziękuję", "ok", "okej", "super", "do zobaczenia"]) and len(text.split()) <= 6:
             return (
-                "Super, mam już komplet danych i przekazuję zgłoszenie do serwisu. "
-                "Skontaktujemy się, aby potwierdzić dogodny termin. Do usłyszenia."
+                "Super, mam juz komplet danych i przekazuje zgloszenie do serwisu. "
+                "Skontaktujemy sie, aby potwierdzic dogodny termin. Do uslyszenia."
             )
         return None
