@@ -42,21 +42,24 @@ class ConsultantService:
         if closing_reply:
             return closing_reply
 
-        catalog_query = " ".join(filter(None, [lead.device_model_raw, user_text]))
+        history_text = self._history_context(lead)
+        catalog_query = " ".join(filter(None, [lead.device_model_raw, history_text, user_text]))
         strict_match = self.catalog.find_strict_match(catalog_query)
         catalog_matches = self.catalog.find_best_matches(catalog_query)
         if strict_match and (not catalog_matches or catalog_matches[0].id != strict_match.id):
             catalog_matches = [strict_match, *catalog_matches][:3]
         pricing_intent = self._is_pricing_intent(user_text)
         variant_matches = self._find_variant_matches(catalog_matches)
+        if self._is_explanation_request(user_text) and catalog_matches:
+            return self._build_explanation_reply(catalog_matches[0], variant_matches[:3])
 
-        if pricing_intent and len(variant_matches) >= 2:
+        if (pricing_intent or self._is_option_request(user_text)) and len(variant_matches) >= 2:
             return self._build_catalog_options_reply(variant_matches[:3])
 
         if pricing_intent and strict_match:
             return (
                 f"Dla tej naprawy mamy gotową pozycję w cenniku: {strict_match.title} za około {strict_match.base_price:.2f} PLN. "
-                "Jeśli chcesz, mogę od razu zapisać kontakt do serwisu albo podpowiedzieć, czy istnieje tańsza lub wyższa jakościowo opcja."
+                f"{strict_match.description or 'Jeśli chcesz, mogę też porównać ten wariant z tańszą albo lepszą jakościowo opcją.'}"
             )
 
         if self.runtime.get_google_api_key():
@@ -146,14 +149,14 @@ class ConsultantService:
     def _fallback_reply(self, lead, user_text: str, catalog_matches, strict_match, variant_matches) -> str:
         """Heurystyczna odpowiedz, gdy AI jest niedostepne lub katalog juz wystarcza."""
 
-        if len(variant_matches) >= 2 and self._is_pricing_intent(user_text):
+        if len(variant_matches) >= 2 and (self._is_pricing_intent(user_text) or self._is_option_request(user_text)):
             return self._build_catalog_options_reply(variant_matches[:3])
 
         if strict_match:
             return (
                 f"Dla tej naprawy mamy juz gotowa pozycje w cenniku: {strict_match.title}. "
                 f"Orientacyjna cena to {strict_match.base_price:.2f} PLN. "
-                f"{strict_match.description or 'Jesli chcesz, od razu zapisze Twoje zgloszenie i kontakt do serwisu.'}"
+                f"{strict_match.description or 'Jesli chcesz, moge porownac ten wariant z inna opcja albo od razu zapisac kontakt do serwisu.'}"
             )
 
         if catalog_matches:
@@ -202,6 +205,23 @@ class ConsultantService:
             f"{difference} Jeśli chcesz, pomogę dobrać najlepszy wariant pod budżet albo od razu zapiszę kontakt do serwisu."
         )
 
+    def _build_explanation_reply(self, selected_item, variant_matches) -> str:
+        """Wyjaśnia klientowi, co oznacza dany wariant i czym różni się od innych."""
+
+        description = (selected_item.description or "").strip()
+        if len(variant_matches) >= 2:
+            difference = self._summarize_variant_difference(variant_matches)
+            return (
+                f"W tym wariancie chodzi o pozycję {selected_item.title} za około {selected_item.base_price:.2f} PLN. "
+                f"{description or difference} "
+                "Jeśli chcesz, mogę od razu porównać go z pozostałymi opcjami i podpowiedzieć, co bardziej się opłaca."
+            )
+        return (
+            f"Chodzi o wariant {selected_item.title} za około {selected_item.base_price:.2f} PLN. "
+            f"{description or 'To po prostu opis zakresu tej konkretnej usługi.'} "
+            "Jeśli chcesz, wyjaśnię dokładnie, co wchodzi w tę cenę."
+        )
+
     def _summarize_variant_difference(self, variants) -> str:
         """Buduje krótkie wyjaśnienie różnic między wariantami katalogowymi."""
 
@@ -242,6 +262,15 @@ class ConsultantService:
         first_key = family_key(catalog_matches[0])
         variants = [item for item in catalog_matches if family_key(item) == first_key]
         return variants if len(variants) >= 2 else catalog_matches
+
+    @staticmethod
+    def _history_context(lead) -> str:
+        """Buduje krótki kontekst z ostatnich wiadomości, aby follow-upy działały lepiej."""
+
+        if not getattr(lead, "messages", None):
+            return ""
+        recent = [item.message_text for item in lead.messages[-6:] if getattr(item, "message_text", None)]
+        return " ".join(recent)
 
     def _should_request_media(self, lead, user_text: str, catalog_matches, strict_match) -> bool:
         """Prosi o media tylko wtedy, gdy bez nich nie da się sensownie odróżnić wariantu naprawy."""
@@ -287,6 +316,47 @@ class ConsultantService:
         return any(token in text for token in visual_damage)
 
     @staticmethod
+    def _is_option_request(text: str) -> bool:
+        """Rozpoznaje pytania o inne warianty lub tańszą opcję."""
+
+        value = (text or "").lower()
+        signals = [
+            "inna opcja",
+            "inne opcje",
+            "da sie na",
+            "da się na",
+            "jest tansza",
+            "jest tańsza",
+            "sa jeszcze",
+            "są jeszcze",
+            "czy macie",
+            "mozna taniej",
+            "można taniej",
+            "zamiennik",
+            "oryginal",
+            "oryginał",
+        ]
+        return any(signal in value for signal in signals)
+
+    @staticmethod
+    def _is_explanation_request(text: str) -> bool:
+        """Rozpoznaje pytania typu 'co to znaczy' albo 'jaka jest różnica'."""
+
+        value = (text or "").lower()
+        signals = [
+            "co znaczy",
+            "co to znaczy",
+            "jaka roznica",
+            "jaka różnica",
+            "czym sie rozni",
+            "czym się różni",
+            "o co chodzi",
+            "wyjasnij",
+            "wyjaśnij",
+        ]
+        return any(signal in value for signal in signals)
+
+    @staticmethod
     def _clean_response(text: str) -> str:
         """Czysci odpowiedz modelu z markdown i skraca ja do kilku zdan."""
 
@@ -302,7 +372,7 @@ class ConsultantService:
         """Probuje wyciagnac model urzadzenia nawet wtedy, gdy nie ma go w lokalnej bazie."""
 
         patterns = [
-            r"(iphone\s?[a-z0-9+\- ]{1,20})",
+            r"(iphone\s?(?:se|x|xr|xs|11|12|13|14|15|16)(?:\s?(?:pro|max|mini|plus))?)",
             r"(samsung\s+galaxy\s?[a-z0-9+\- ]{1,20})",
             r"(galaxy\s?[a-z0-9+\- ]{1,20})",
         ]
